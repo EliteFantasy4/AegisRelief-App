@@ -1,0 +1,6 @@
+{
+  "name": "AegisRelief - Global Disaster Intelligence & Preparedness Portal",
+  "description": "Universal single-platform disaster intelligence and emergency preparedness portal featuring real-time alerts, geospatial threat tracking, analytical data visualization, survivor checklists, and country emergency helplines.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
