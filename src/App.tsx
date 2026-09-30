@@ -11,17 +11,46 @@ import { PreparednessGuides } from './components/Preparedness/PreparednessGuides
 import { HistoricalArchives } from './components/Historical/HistoricalArchives';
 import { EmergencyDirectory } from './components/Directory/EmergencyDirectory';
 import { AegisAssistant } from './components/Assistant/AegisAssistantModal';
-import {
-  Shield,
-  Activity,
-  HeartHandshake,
-  ExternalLink,
-  MapPin,
-  Layers,
-  Sparkles,
-  PhoneCall,
-  CheckCircle,
-} from 'lucide-react';
+import { Shield, Sparkles } from 'lucide-react';
+
+const VALID_TABS: ActiveTab[] = [
+  'live-stream',
+  'analytics',
+  'preparedness',
+  'historical',
+  'directory',
+];
+
+function resolveInitialTab(): ActiveTab {
+  if (typeof window === 'undefined') return 'live-stream';
+  try {
+    // 1. Check URL Hash (e.g. #analytics or #/analytics)
+    const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+    if (VALID_TABS.includes(hash as ActiveTab)) {
+      return hash as ActiveTab;
+    }
+
+    // 2. Check query parameter (e.g. ?tab=preparedness)
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab')?.toLowerCase();
+    if (tabParam && VALID_TABS.includes(tabParam as ActiveTab)) {
+      return tabParam as ActiveTab;
+    }
+
+    // 3. Check pathname relative to /AegisRelief-App/
+    const path = window.location.pathname
+      .replace(/^\/AegisRelief-App\/?/, '')
+      .replace(/^\//, '')
+      .replace(/\/$/, '')
+      .toLowerCase();
+    if (VALID_TABS.includes(path as ActiveTab)) {
+      return path as ActiveTab;
+    }
+  } catch {
+    // Defensive fallback
+  }
+  return 'live-stream';
+}
 
 export default function App() {
   // Theme state
@@ -35,8 +64,8 @@ export default function App() {
     }
   });
 
-  // Navigation tab state
-  const [activeTab, setActiveTab] = useState<ActiveTab>('live-stream');
+  // Navigation tab state with deep-link resolution
+  const [activeTab, setActiveTab] = useState<ActiveTab>(resolveInitialTab);
 
   // Selected disaster alert for detail inspection
   const [selectedAlert, setSelectedAlert] = useState<DisasterAlert | null>(null);
@@ -51,16 +80,50 @@ export default function App() {
 
   // Sync dark mode class on document element
   useEffect(() => {
-    if (darkMode) {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('aegis_theme', 'dark');
-    } else {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('aegis_theme', 'light');
+    try {
+      if (darkMode) {
+        document.documentElement.classList.add('dark');
+        localStorage.setItem('aegis_theme', 'dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+        localStorage.setItem('aegis_theme', 'light');
+      }
+    } catch {
+      // Safe fallback
     }
   }, [darkMode]);
 
+  // Sync route on hashchange / popstate (for back/forward navigation)
+  useEffect(() => {
+    const handleUrlChange = () => {
+      const target = resolveInitialTab();
+      setActiveTab(target);
+    };
+
+    window.addEventListener('hashchange', handleUrlChange);
+    window.addEventListener('popstate', handleUrlChange);
+
+    return () => {
+      window.removeEventListener('hashchange', handleUrlChange);
+      window.removeEventListener('popstate', handleUrlChange);
+    };
+  }, []);
+
   const toggleDarkMode = () => setDarkMode((prev) => !prev);
+
+  // Handle tab switching and sync hash
+  const handleTabChange = (tab: ActiveTab) => {
+    if (tab === 'assistant') {
+      setIsAssistantOpen(true);
+    } else {
+      setActiveTab(tab);
+      try {
+        window.location.hash = `#${tab}`;
+      } catch {
+        // Safe fallback
+      }
+    }
+  };
 
   // Triggers AI Assistant with pre-filled context
   const handleAskAiAboutAlert = (alert: DisasterAlert) => {
@@ -82,7 +145,7 @@ export default function App() {
   const handleGoToDirectoryForCountry = (country: string) => {
     setSelectedAlert(null);
     setDirectoryCountry(country);
-    setActiveTab('directory');
+    handleTabChange('directory');
   };
 
   return (
@@ -101,20 +164,14 @@ export default function App() {
         }}
         onGoToDirectory={() => {
           setDirectoryCountry('Nepal');
-          setActiveTab('directory');
+          handleTabChange('directory');
         }}
       />
 
       {/* Main Tab Navigation */}
       <Navigation
         activeTab={activeTab}
-        onTabChange={(tab) => {
-          if (tab === 'assistant') {
-            setIsAssistantOpen(true);
-          } else {
-            setActiveTab(tab);
-          }
-        }}
+        onTabChange={handleTabChange}
         activeAlertCount={MOCK_DISASTERS.length}
       />
 
@@ -224,14 +281,14 @@ export default function App() {
               <button
                 onClick={() => {
                   setDirectoryCountry('Nepal');
-                  setActiveTab('directory');
+                  handleTabChange('directory');
                 }}
                 className="hover:text-sky-600 dark:hover:text-sky-400 flex items-center gap-1"
               >
                 <span>🇳🇵 Nepal Emergency Directory</span>
               </button>
               <button
-                onClick={() => setActiveTab('preparedness')}
+                onClick={() => handleTabChange('preparedness')}
                 className="hover:text-sky-600 dark:hover:text-sky-400"
               >
                 72-Hour GO-BAG Checklist

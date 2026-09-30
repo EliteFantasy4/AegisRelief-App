@@ -1,18 +1,39 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import fs from 'fs';
 import dotenv from 'dotenv';
 import { defineConfig, Plugin } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 
 dotenv.config();
 
+// Plugin to ensure GitHub Pages serves index.html on 404 for SPA routing
+function githubPagesSpaPlugin(): Plugin {
+  return {
+    name: 'github-pages-spa',
+    closeBundle() {
+      try {
+        const distDir = path.resolve(__dirname, 'dist');
+        const distIndex = path.resolve(distDir, 'index.html');
+        const dist404 = path.resolve(distDir, '404.html');
+        if (fs.existsSync(distIndex)) {
+          fs.copyFileSync(distIndex, dist404);
+        }
+      } catch (e) {
+        console.warn('Could not copy index.html to 404.html:', e);
+      }
+    },
+  };
+}
+
 function devApiPlugin(): Plugin {
   let aiClient: GoogleGenAI | null = null;
-  if (process.env.GEMINI_API_KEY) {
+  const apiKey = process.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+  if (apiKey) {
     try {
       aiClient = new GoogleGenAI({
-        apiKey: process.env.GEMINI_API_KEY,
+        apiKey,
         httpOptions: {
           headers: {
             'User-Agent': 'aistudio-build',
@@ -28,7 +49,11 @@ function devApiPlugin(): Plugin {
     name: 'aegis-dev-api',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
-        if (req.url === '/api/assistant' && req.method === 'POST') {
+        const url = req.url || '';
+        const isAssistant = url === '/api/assistant' || url.startsWith('/AegisRelief-App/api/assistant');
+        const isHealth = url === '/api/health' || url.startsWith('/AegisRelief-App/api/health');
+
+        if (isAssistant && req.method === 'POST') {
           let bodyStr = '';
           req.on('data', (chunk) => {
             bodyStr += chunk;
@@ -72,7 +97,7 @@ Guidelines:
 ${langInstruction}`;
 
               const response = await aiClient.models.generateContent({
-                model: 'gemini-3.8-flash',
+                model: 'gemini-2.5-flash',
                 contents: `Context: Location=${userLocation}, Category=${contextCategory || 'General Disaster'}. User Inquiry: "${prompt}"`,
                 config: {
                   systemInstruction,
@@ -84,7 +109,7 @@ ${langInstruction}`;
               return res.end(
                 JSON.stringify({
                   reply: response.text || 'Immediate action: Seek shelter and listen to official broadcasts.',
-                  source: 'gemini-3.8-flash',
+                  source: 'gemini-live',
                 })
               );
             } catch (err: any) {
@@ -96,13 +121,13 @@ ${langInstruction}`;
           return;
         }
 
-        if (req.url === '/api/health') {
+        if (isHealth) {
           res.setHeader('Content-Type', 'application/json');
           return res.end(
             JSON.stringify({
               status: 'healthy',
               devServer: true,
-              aiConfigured: Boolean(process.env.GEMINI_API_KEY),
+              aiConfigured: Boolean(apiKey),
             })
           );
         }
@@ -115,7 +140,8 @@ ${langInstruction}`;
 
 export default defineConfig(() => {
   return {
-    plugins: [react(), tailwindcss(), devApiPlugin()],
+    base: '/AegisRelief-App/',
+    plugins: [react(), tailwindcss(), devApiPlugin(), githubPagesSpaPlugin()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),
@@ -123,7 +149,7 @@ export default defineConfig(() => {
     },
     server: {
       host: '0.0.0.0',
-      port: Number(process.env.PORT) || 3000,
+      port: Number(process.env.PORT) || 8080,
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },

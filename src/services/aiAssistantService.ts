@@ -1,3 +1,5 @@
+import { GoogleGenAI } from '@google/genai';
+
 export interface ChatMessage {
   id: string;
   sender: 'user' | 'assistant';
@@ -13,6 +15,27 @@ export interface AssistantRequestOptions {
   language: 'en' | 'ne' | 'es' | 'fr';
   contextCategory?: string;
   userLocation?: string;
+}
+
+/**
+ * Defensive key extraction: safely check VITE_GEMINI_API_KEY without throwing errors if undefined
+ */
+export function getGeminiApiKey(): string | undefined {
+  try {
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+      const key = import.meta.env.VITE_GEMINI_API_KEY;
+      if (typeof key === 'string' && key.trim().length > 0 && !key.includes('MY_GEMINI_API_KEY')) {
+        return key.trim();
+      }
+    }
+  } catch {
+    // Non-blocking catch
+  }
+  return undefined;
+}
+
+export function isAiConfigured(): boolean {
+  return Boolean(getGeminiApiKey());
 }
 
 // Highly structured localized emergency rulebook fallback
@@ -118,9 +141,63 @@ export async function askAegisAssistant(
   const normalized = prompt.toLowerCase();
   const lang = options.language || 'en';
 
-  // 1. Try server-side Gemini API route first with try...catch
+  const langInstruction =
+    lang === 'ne'
+      ? 'Respond directly and clearly in fluent Nepali (नेपाली भाषामा). Use clear bullet points and action-oriented emergency guidance.'
+      : lang === 'es'
+      ? 'Respond directly in Spanish (Español) with concise emergency instructions.'
+      : lang === 'fr'
+      ? 'Respond directly in French (Français) with concise emergency instructions.'
+      : 'Respond clearly in English with direct, prioritized, actionable emergency steps.';
+
+  const systemInstruction = `You are Aegis AI, the dedicated emergency intelligence companion for the AegisRelief portal.
+Guidelines:
+1. Always prioritize immediate human life safety instructions first.
+2. For earthquake questions in Nepal or South Asia, specifically mention Nepal Emergency Helplines (Police: 100, Ambulance: 102, Fire: 101, NDRRMA: 1155, APF: 1114).
+3. Be concise, authoritative, calm, and structured with bold highlights and numbered action checklists.
+${langInstruction}`;
+
+  // Strategy 1: Client-Side direct Gemini API call if VITE_GEMINI_API_KEY is available
+  const clientKey = getGeminiApiKey();
+  if (clientKey) {
+    try {
+      const aiClient = new GoogleGenAI({ apiKey: clientKey });
+      const response = await aiClient.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: `Context: Location=${options.userLocation || 'Global'}, Category=${options.contextCategory || 'General Disaster'}. User Inquiry: "${prompt}"`,
+        config: {
+          systemInstruction,
+          temperature: 0.3,
+        },
+      });
+
+      if (response && response.text) {
+        return {
+          id: `msg-${Date.now()}`,
+          sender: 'assistant',
+          text: response.text,
+          timestamp: new Date().toISOString(),
+          language: lang,
+          source: 'gemini-live',
+          suggestions: [
+            lang === 'ne' ? 'भूकम्प सुरक्षा उपायहरू' : 'Earthquake survival checklist',
+            lang === 'ne' ? 'नेपाल आपत्कालीन सम्पर्क' : 'Nepal emergency helplines',
+            lang === 'ne' ? 'बाढी पूर्वतयारी' : 'Flash flood evacuation steps',
+          ],
+        };
+      }
+    } catch (clientErr) {
+      console.warn('Client-side Gemini API call did not succeed, testing fallback:', clientErr);
+    }
+  }
+
+  // Strategy 2: Server API endpoint if running with backend dev server or fullstack host
   try {
-    const res = await fetch('/api/assistant', {
+    const rawBase = (typeof import.meta !== 'undefined' && import.meta.env?.BASE_URL) || '/';
+    const cleanBase = rawBase.endsWith('/') ? rawBase.slice(0, -1) : rawBase;
+    const endpoint = `${cleanBase}/api/assistant`;
+
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -134,34 +211,58 @@ export async function askAegisAssistant(
     });
 
     if (res.ok) {
-      const data = await res.json();
-      if (data && data.reply) {
-        return {
-          id: `msg-${Date.now()}`,
-          sender: 'assistant',
-          text: data.reply,
-          timestamp: new Date().toISOString(),
-          language: lang,
-          source: 'gemini-live',
-          suggestions: data.suggestions || [
-            lang === 'ne' ? 'भूकम्प सुरक्षा उपायहरू' : 'Earthquake survival checklist',
-            lang === 'ne' ? 'नेपाल आपत्कालीन सम्पर्क' : 'Nepal emergency helplines',
-            lang === 'ne' ? 'बाढी पूर्वतयारी' : 'Flash flood evacuation steps',
-          ],
-        };
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const data = await res.json();
+        if (data && data.reply) {
+          return {
+            id: `msg-${Date.now()}`,
+            sender: 'assistant',
+            text: data.reply,
+            timestamp: new Date().toISOString(),
+            language: lang,
+            source: 'gemini-live',
+            suggestions: data.suggestions || [
+              lang === 'ne' ? 'भूकम्प सुरक्षा उपायहरू' : 'Earthquake survival checklist',
+              lang === 'ne' ? 'नेपाल आपत्कालीन सम्पर्क' : 'Nepal emergency helplines',
+              lang === 'ne' ? 'बाढी पूर्वतयारी' : 'Flash flood evacuation steps',
+            ],
+          };
+        }
       }
     }
   } catch {
-    // Graceful fallback to local structured emergency knowledge base
+    // Graceful silent fallback to structured offline knowledge base
   }
 
-  // 2. High-precision local fallback response
+  // Strategy 3: Highly reliable offline emergency disaster knowledge base (zero crash guarantee)
   let matchedTopic = 'general';
-  if (normalized.includes('quake') || normalized.includes('earthquake') || normalized.includes('भूकम्प') || normalized.includes('shaking') || normalized.includes('terremoto') || normalized.includes('séisme')) {
+  if (
+    normalized.includes('quake') ||
+    normalized.includes('earthquake') ||
+    normalized.includes('भूकम्प') ||
+    normalized.includes('shaking') ||
+    normalized.includes('terremoto') ||
+    normalized.includes('séisme')
+  ) {
     matchedTopic = 'earthquake';
-  } else if (normalized.includes('flood') || normalized.includes('बाढी') || normalized.includes('डुबान') || normalized.includes('inundat') || normalized.includes('inondation') || normalized.includes('water')) {
+  } else if (
+    normalized.includes('flood') ||
+    normalized.includes('बाढी') ||
+    normalized.includes('डुबान') ||
+    normalized.includes('inundat') ||
+    normalized.includes('inondation') ||
+    normalized.includes('water')
+  ) {
     matchedTopic = 'flood';
-  } else if (normalized.includes('nepal') || normalized.includes('नेपाल') || normalized.includes('kathmandu') || normalized.includes('100') || normalized.includes('1155') || normalized.includes('helpline')) {
+  } else if (
+    normalized.includes('nepal') ||
+    normalized.includes('नेपाल') ||
+    normalized.includes('kathmandu') ||
+    normalized.includes('100') ||
+    normalized.includes('1155') ||
+    normalized.includes('helpline')
+  ) {
     matchedTopic = 'nepal';
   }
 
