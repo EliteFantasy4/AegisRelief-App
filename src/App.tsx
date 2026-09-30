@@ -67,8 +67,11 @@ export default function App() {
   // Navigation tab state with deep-link resolution
   const [activeTab, setActiveTab] = useState<ActiveTab>(resolveInitialTab);
 
-  // Selected disaster alert for detail inspection
-  const [selectedAlert, setSelectedAlert] = useState<DisasterAlert | null>(null);
+  // Selected disaster alert for map SitRep pin & inspection
+  const [selectedAlert, setSelectedAlert] = useState<DisasterAlert | null>(() => MOCK_DISASTERS[0]);
+
+  // Full-screen Situation Dossier Detail Modal state
+  const [modalAlert, setModalAlert] = useState<DisasterAlert | null>(null);
 
   // AI Assistant Modal state
   const [isAssistantOpen, setIsAssistantOpen] = useState<boolean>(false);
@@ -160,7 +163,10 @@ export default function App() {
         }}
         onSelectAlert={(id) => {
           const match = MOCK_DISASTERS.find((d) => d.id === id);
-          if (match) setSelectedAlert(match);
+          if (match) {
+            setSelectedAlert(match);
+            setModalAlert(match);
+          }
         }}
         onGoToDirectory={() => {
           setDirectoryCountry('Nepal');
@@ -190,7 +196,7 @@ export default function App() {
                   </h2>
                 </div>
                 <div className="text-xs font-mono text-slate-500 dark:text-slate-400 hidden sm:block">
-                  Click any epicenter marker to view tactical SitRep
+                  Click any epicenter marker to inspect pinned Tactical SitRep
                 </div>
               </div>
 
@@ -198,6 +204,10 @@ export default function App() {
                 alerts={MOCK_DISASTERS}
                 selectedAlertId={selectedAlert?.id || null}
                 onSelectAlert={(alert) => setSelectedAlert(alert)}
+                onOpenFullDossier={(alert) => setModalAlert(alert)}
+                onGoToDirectory={handleGoToDirectoryForCountry}
+                onGoToPreparedness={handleAskAiForGuide}
+                onAskAi={handleAskAiAboutAlert}
               />
             </section>
 
@@ -206,7 +216,10 @@ export default function App() {
               <AlertList
                 alerts={MOCK_DISASTERS}
                 selectedAlertId={selectedAlert?.id || null}
-                onSelectAlert={(alert) => setSelectedAlert(alert)}
+                onSelectAlert={(alert) => {
+                  setSelectedAlert(alert);
+                  setModalAlert(alert);
+                }}
               />
             </section>
           </div>
@@ -243,8 +256,8 @@ export default function App() {
 
       {/* Situational Alert Detail Modal */}
       <AlertDetailModal
-        alert={selectedAlert}
-        onClose={() => setSelectedAlert(null)}
+        alert={modalAlert}
+        onClose={() => setModalAlert(null)}
         onAskAi={handleAskAiAboutAlert}
         onGoToDirectoryForCountry={handleGoToDirectoryForCountry}
       />
